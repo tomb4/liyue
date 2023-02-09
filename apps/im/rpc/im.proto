@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package im;
+
+option go_package = "./pb";
+
+message LoginReq {
+  int64 uid = 1;
+  string password = 2;
+}
+
+message LoginResp {
+  string username = 1;
+}
+
+service Im {
+  rpc login(LoginReq) returns (LoginResp);
+}

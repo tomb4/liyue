@@ -30,6 +30,6 @@ func (s *GatewayServer) Greet(ctx context.Context, in *pb.GreetReq) (*pb.GreetRe
 	return l.Greet(in)
 }
 
-func (s *GatewayServer) Listen(svcCtx *svc.ServiceContext) {
+func (s *GatewayServer) Listen() {
 	s.websocketSrv.ListenAndServe()
 }

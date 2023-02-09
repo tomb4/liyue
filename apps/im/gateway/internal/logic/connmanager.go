@@ -2,6 +2,9 @@ package logic
 
 import (
 	"context"
+	"encoding/json"
+	"github.com/pkg/errors"
+	"liyue/apps/im/gateway/internal/svc"
 	"sync"
 
 	"liyue/apps/im/gateway/internal/ecode"
@@ -21,19 +24,39 @@ type (
 		unAuthConnStore sync.Map
 		connStore       sync.Map
 		connStoreLock   sync.RWMutex
+		handler         *GatewayLogic
 	}
 )
 
-func OnceConnManager() *ConnManager {
+func OnceConnManager(ctxSvc *svc.ServiceContext) *ConnManager {
 	_onceConnManager.Do(func() {
 		_connManager = &ConnManager{
 			Logger:          logx.WithContext(context.TODO()),
 			unAuthConnStore: sync.Map{},
 			connStore:       sync.Map{},
 			connStoreLock:   sync.RWMutex{},
+			handler:         NewGatewayLogic(context.TODO(), ctxSvc),
 		}
 	})
 	return _connManager
+}
+
+func (c *ConnManager) SaveConn(conn Connection) {
+	key := conn.GetUserId()
+	old, exists := c.connStore.Load(key)
+	//如果连接已存在且已经存在的连接与希望存入的连接不是同一个连接 则关闭老的连接
+	if exists && old.(Connection).GetConnectionId() != conn.GetConnectionId() {
+		err := old.(Connection).Close()
+		if err != nil {
+			c.Error("SaveConn err:", err)
+		}
+	}
+
+	c.connStoreLock.Lock()
+	defer c.connStoreLock.Unlock()
+
+	c.connStore.Store(key, conn)
+	c.unAuthConnStore.Delete(conn.GetConnectionId())
 }
 
 func (c *ConnManager) DelConn(conn Connection) {
@@ -56,6 +79,23 @@ func (c *ConnManager) DelConn(conn Connection) {
 	c.connStore.Delete(key)
 }
 
+func (c *ConnManager) SendMessage(key int64, data []byte) error {
+	cc, ok := c.connStore.Load(key)
+	if !ok {
+		c.Info("SendMessage not found", key)
+		return errors.New("SendMessage not found")
+	}
+
+	conn := cc.(Connection)
+	err := conn.Write(data)
+	if err != nil {
+		c.Error("SendMessage err", err)
+		return err
+	}
+
+	return nil
+}
+
 func (c *ConnManager) Dispatch(conn Connection) {
 	c.Info("Establish connection, id:", conn.GetConnectionId())
 	c.unAuthConnStore.Store(conn.GetConnectionId(), conn)
@@ -64,9 +104,9 @@ func (c *ConnManager) Dispatch(conn Connection) {
 		//如果是我们自己主动关闭的连接，则不需要打印错误信息了
 		if e != nil && !conn.IsClosed() {
 			if websocket.IsCloseError(e, websocket.CloseNoStatusReceived) {
-				c.Info("read err 正常关闭报错", e)
+				c.Info("normal read err:", e)
 			} else {
-				c.Info("read err", e)
+				c.Info("read err:", e)
 			}
 			//如果是一些常规错误，则忽略此次报文
 			if e == ecode.ErrMessageType {
@@ -82,15 +122,84 @@ func (c *ConnManager) Dispatch(conn Connection) {
 	}
 	err := conn.Close()
 	if err != nil {
-		c.Error("close err", err)
+		c.Error("close err:", err)
 	}
 	c.DelConn(conn)
 }
 
-func (c *ConnManager) HandleMessage(bts []byte, conn Connection) {
-	// TODO
-	err := conn.Write(bts)
+func (c *ConnManager) HandleMessage(data []byte, conn Connection) {
+	packet, err := GetPacketByJson(data)
 	if err != nil {
-		c.Error("write err", err)
+		c.Error("GetPacketByJson err:", err)
+		return
 	}
+
+	if packet.CmdId != CmdLoginRep && conn.GetUserId() == 0 {
+		c.Error("Please login first")
+		return
+	}
+
+	var out MessageOut
+	switch packet.CmdId {
+	case CmdLoginRep:
+		out = c.handleCmdLoginRep(conn, packet.Body)
+	case CmdSendMessageRep:
+		out = c.handleCmdSendMessageRep(packet.Body)
+	default:
+		return
+	}
+
+	outData, err := json.Marshal(out)
+	if err != nil {
+		c.Error("json err:", err)
+		return
+	}
+	err = conn.Write(outData)
+	if err != nil {
+		c.Error("write err:", err)
+	}
+}
+
+func (c *ConnManager) handleCmdSendMessageRep(data []byte) (out MessageOut) {
+	var req MsgSendMessageRep
+	err := json.Unmarshal(data, &req)
+	if err != nil {
+		out.Msg = err.Error()
+		return
+	}
+
+	// TODO rpc send message
+
+	err = c.SendMessage(req.To, []byte(req.Msg))
+	if err != nil {
+		out.Msg = err.Error()
+		return
+	}
+
+	out.Code = CmdSendMessageResp
+	out.Msg = "send message ok"
+	return
+}
+
+func (c *ConnManager) handleCmdLoginRep(conn Connection, data []byte) (out MessageOut) {
+	var req MsgLoginRep
+	err := json.Unmarshal(data, &req)
+	if err != nil {
+		out.Msg = err.Error()
+		return
+	}
+
+	userInfo, err := c.handler.Login(req.Uid, req.Password)
+	if err != nil {
+		out.Msg = err.Error()
+		return
+	}
+
+	conn.SetUserId(req.Uid)
+	c.SaveConn(conn)
+
+	out.Code = CmdLoginResp
+	out.Msg = "login success"
+	out.Data = userInfo.UserName
+	return
 }

@@ -17,8 +17,8 @@ type (
 		GetConnectionId() string
 		SetConnType(t int32)
 		GetConnType() int32
-		SetUserId(t int32)
-		GetUserId() int32
+		SetUserId(t int64)
+		GetUserId() int64
 		SetPingAt(t int64)
 		GetPingAt() int64
 		SetBizId(s string)
@@ -26,7 +26,7 @@ type (
 		IsClosed() bool
 	}
 
-	conn struct {
+	defaultConnection struct {
 		writeLock sync.Mutex
 		closed    bool
 
@@ -34,52 +34,52 @@ type (
 		connectionId string
 		connType     int32
 		bizId        string
-		userId       int32
+		userId       int64
 		pingAt       int64
 		createdAt    int64
 	}
 )
 
-func (m *conn) SetConnType(t int32) {
+func (m *defaultConnection) SetConnType(t int32) {
 	m.connType = t
 }
 
-func (m *conn) GetConnType() int32 {
+func (m *defaultConnection) GetConnType() int32 {
 	return m.connType
 }
 
-func (m *conn) SetUserId(t int32) {
+func (m *defaultConnection) SetUserId(t int64) {
 	m.userId = t
 }
 
-func (m *conn) GetUserId() int32 {
+func (m *defaultConnection) GetUserId() int64 {
 	return m.userId
 }
 
-func (m *conn) SetPingAt(t int64) {
+func (m *defaultConnection) SetPingAt(t int64) {
 	m.pingAt = t
 }
 
-func (m *conn) GetPingAt() int64 {
+func (m *defaultConnection) GetPingAt() int64 {
 	return m.pingAt
 }
 
-func (m *conn) SetBizId(t string) {
+func (m *defaultConnection) SetBizId(t string) {
 	m.bizId = t
 }
 
-func (m *conn) GetBizId() string {
+func (m *defaultConnection) GetBizId() string {
 	return m.bizId
 }
 
-func (m *conn) GetClientIp() string {
+func (m *defaultConnection) GetClientIp() string {
 	return m.clientIp
 }
-func (m *conn) GetConnectionId() string {
+func (m *defaultConnection) GetConnectionId() string {
 	return m.connectionId
 }
 
-func (m *conn) IsDead() bool {
+func (m *defaultConnection) IsDead() bool {
 	//now := utils.CurrentMillis()
 	//如果已经登录过且有心跳
 	//if m.pingAt != 0 {
@@ -93,6 +93,6 @@ func (m *conn) IsDead() bool {
 	//}
 	return false
 }
-func (m *conn) IsClosed() bool {
+func (m *defaultConnection) IsClosed() bool {
 	return m.closed
 }

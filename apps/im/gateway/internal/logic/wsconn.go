@@ -14,7 +14,7 @@ import (
 
 type (
 	websocketConn struct {
-		*conn
+		*defaultConnection
 		websocketConn *websocket.Conn
 	}
 
@@ -65,7 +65,7 @@ func (s WebsocketServer) echo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	webConn := &websocketConn{
-		conn: &conn{
+		defaultConnection: &defaultConnection{
 			connectionId: utils.NewUuid(),
 			createdAt:    utils.CurrentMillis(),
 			clientIp:     r.Header.Get("X-Forwarded-For"),
@@ -76,7 +76,7 @@ func (s WebsocketServer) echo(w http.ResponseWriter, r *http.Request) {
 		webConn.clientIp = r.RemoteAddr
 	}
 
-	OnceConnManager().Dispatch(webConn)
+	OnceConnManager(s.svcCtx).Dispatch(webConn)
 }
 
 func (m *websocketConn) Read() (p []byte, err error) {
@@ -94,7 +94,7 @@ func (m *websocketConn) Write(p []byte) error {
 	m.writeLock.Lock()
 	defer m.writeLock.Unlock()
 	if m.websocketConn == nil {
-		return errors.New("websocketConn conn is nil")
+		return errors.New("websocketConn is nil")
 	}
 	err := m.websocketConn.WriteMessage(websocket.BinaryMessage, p)
 	return err
