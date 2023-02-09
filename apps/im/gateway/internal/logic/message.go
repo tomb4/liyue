@@ -3,10 +3,12 @@ package logic
 import "encoding/json"
 
 const (
-	CmdLoginRep int16 = iota + 1
+	CmdLoginReq int16 = iota + 1
 	CmdLoginResp
-	CmdSendMessageRep
+	CmdSendMessageReq
 	CmdSendMessageResp
+	CmdCreateConvReq
+	CmdCreateConvResp
 )
 
 type (
@@ -16,8 +18,12 @@ type (
 	}
 
 	MsgSendMessageRep struct {
-		To  int64  `json:"to"`
-		Msg string `json:"msg"`
+		ConvId string `json:"convId"`
+		Msg    string `json:"msg"`
+	}
+
+	MsgCreateConvReq struct {
+		Uids []int64 `json:"uids"`
 	}
 )
 
@@ -34,7 +40,7 @@ type (
 	}
 
 	MessageOut struct {
-		Code int16    `json:"code"`
+		Code int16  `json:"code"`
 		Msg  string `json:"msg"`
 		Data string `json:"data"`
 	}

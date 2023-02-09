@@ -3,9 +3,11 @@ package logic
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"github.com/pkg/errors"
 	"liyue/apps/im/gateway/internal/svc"
 	"sync"
+	"time"
 
 	"liyue/apps/im/gateway/internal/ecode"
 
@@ -25,6 +27,7 @@ type (
 		connStore       sync.Map
 		connStoreLock   sync.RWMutex
 		handler         *GatewayLogic
+		conversionMap   map[string][]int64 // TODO optimize this
 	}
 )
 
@@ -36,6 +39,7 @@ func OnceConnManager(ctxSvc *svc.ServiceContext) *ConnManager {
 			connStore:       sync.Map{},
 			connStoreLock:   sync.RWMutex{},
 			handler:         NewGatewayLogic(context.TODO(), ctxSvc),
+			conversionMap:   map[string][]int64{},
 		}
 	})
 	return _connManager
@@ -134,17 +138,19 @@ func (c *ConnManager) HandleMessage(data []byte, conn Connection) {
 		return
 	}
 
-	if packet.CmdId != CmdLoginRep && conn.GetUserId() == 0 {
+	if packet.CmdId != CmdLoginReq && conn.GetUserId() == 0 {
 		c.Error("Please login first")
 		return
 	}
 
 	var out MessageOut
 	switch packet.CmdId {
-	case CmdLoginRep:
+	case CmdLoginReq:
 		out = c.handleCmdLoginRep(conn, packet.Body)
-	case CmdSendMessageRep:
-		out = c.handleCmdSendMessageRep(packet.Body)
+	case CmdSendMessageReq:
+		out = c.handleCmdSendMessageRep(conn, packet.Body)
+	case CmdCreateConvReq:
+		out = c.handleCmdCreateConvReq(packet.Body)
 	default:
 		return
 	}
@@ -160,7 +166,29 @@ func (c *ConnManager) HandleMessage(data []byte, conn Connection) {
 	}
 }
 
-func (c *ConnManager) handleCmdSendMessageRep(data []byte) (out MessageOut) {
+func (c *ConnManager) handleCmdCreateConvReq(data []byte) (out MessageOut) {
+	var req MsgCreateConvReq
+	err := json.Unmarshal(data, &req)
+	if err != nil {
+		out.Msg = err.Error()
+		return
+	}
+
+	if len(req.Uids) == 0 {
+		out.Msg = "zero len"
+		return
+	}
+
+	// TODO optimize: use redis
+	convId := fmt.Sprintf("c%d", time.Now().Unix())
+	c.conversionMap[convId] = req.Uids
+
+	out.Code = CmdCreateConvResp
+	out.Data = convId
+	return
+}
+
+func (c *ConnManager) handleCmdSendMessageRep(conn Connection, data []byte) (out MessageOut) {
 	var req MsgSendMessageRep
 	err := json.Unmarshal(data, &req)
 	if err != nil {
@@ -170,10 +198,21 @@ func (c *ConnManager) handleCmdSendMessageRep(data []byte) (out MessageOut) {
 
 	// TODO rpc send message
 
-	err = c.SendMessage(req.To, []byte(req.Msg))
-	if err != nil {
-		out.Msg = err.Error()
+	uids, ok := c.conversionMap[req.ConvId]
+	if !ok {
+		out.Msg = "conversion not found"
 		return
+	}
+
+	for _, uid := range uids {
+		if uid == conn.GetUserId() {
+			continue
+		}
+		err = c.SendMessage(uid, []byte(req.Msg))
+		if err != nil {
+			out.Msg = err.Error()
+			continue
+		}
 	}
 
 	out.Code = CmdSendMessageResp
